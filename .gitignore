@@ -41,7 +41,8 @@ Module.markers
 Module.symvers
 !.gitignore
 !.mailmap
-
+!.config
+/b
 #
 # Generated include files
 #
