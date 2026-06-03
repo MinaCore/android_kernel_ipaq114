@@ -9,7 +9,7 @@ You can download the **arm2008-q3** toolchain from the [Releases](https://github
 
 ## Usage
 
-1. **Download:** Get the `build.zip` archive from the [Releases](https://github.com/MinaCore/android_kernel_ipaq114/releases) section.
+1. **Download:** Get the `build.zip` archive from the [Releases](https://github.com/MinaCore/android_kernel_ipaq114/releases/latest) section.
 2. **Prepare the SD card:** 
    - Partition 1 (Primary): **ext2** (for the root filesystem).
    - Partition 2 (Primary): **FAT32** (for boot files).
