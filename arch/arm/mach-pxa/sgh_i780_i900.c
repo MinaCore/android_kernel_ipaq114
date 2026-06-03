@@ -232,8 +232,6 @@ KEY_CAMERAFOCUS  211           Focuses camera (Omnia only, replaces KEY_HP in ke
 static unsigned int sgh_i780_matrix_key_map[] = {
 /* QWERTY Keyboard */
 /* 1st row */
-KEY(0, 0, KEY_Q), KEY(7, 1, KEY_W), KEY(2, 0, KEY_E), KEY(3, 0, KEY_R), KEY(4, 0, KEY_T),
-KEY(0, 4, KEY_Y), KEY(1, 4, KEY_U), KEY(2, 4, KEY_I), KEY(3, 4, KEY_O), KEY(4, 4, KEY_P),
 /* 2nd row */
 KEY(0, 1, KEY_A), KEY(7, 2, KEY_S), KEY(2, 1, KEY_D), KEY(3, 1, KEY_F), KEY(4, 1, KEY_G),
 KEY(0, 5, KEY_H), KEY(1, 5, KEY_J), KEY(2, 5, KEY_K), KEY(3, 5, KEY_L), KEY(4, 5, KEY_BACKSPACE),
@@ -259,15 +257,17 @@ KEY(7, 3, KEY_CAMERA),
 
 static unsigned int sgh_i900_matrix_key_map[] = {
 	/* KEY(row, col, key_code) */
-	KEY(0, 0, KEY_CAMERAFOCUS),	//Camera half-press
-	KEY(0, 1, KEY_CAMERA),		//Camera full-press
-	KEY(0, 2, KEY_ENTER),		//Center optical dpad button
-	KEY(1, 0, KEY_VOLUMEUP),	//Volume up
-	KEY(1, 1, KEY_VOLUMEDOWN),	//Volume down
-	KEY(1, 2, KEY_SEND),		//Send key
-	KEY(2, 0, KEY_MENU),		//Top right key (Main Menu button)
-	KEY(2, 1, KEY_END),		//???
-	KEY(2, 2, KEY_BACK),		//End key (Back button)
+		//Camera half-press
+	KEY(1, 1, KEY_VOLUMEUP),	//Volume up
+	KEY(3, 0, KEY_END),
+	KEY(2, 0, KEY_VOLUMEDOWN),	//Volume down
+	KEY(0, 2, KEY_MENU),		//Top right key (Main Menu button)		//???
+	KEY(1, 0, KEY_BACK),		//End key (Back button)
+	KEY(1, 2, KEY_LEFT),
+        KEY(2, 1, KEY_UP),
+        KEY(2, 2, KEY_RIGHT),
+        KEY(3, 1, KEY_DOWN),
+        KEY(3, 2, KEY_ENTER),
        
 };
 
@@ -288,7 +288,7 @@ static void __init sgh_init_keypad(void)
 	}
 	else
 	{
-		sgh_keypad_info.matrix_key_rows = 3;
+		sgh_keypad_info.matrix_key_rows = 4;
 		sgh_keypad_info.matrix_key_cols = 3;
 		sgh_keypad_info.matrix_key_map = sgh_i900_matrix_key_map;
 		sgh_keypad_info.matrix_key_map_size = ARRAY_SIZE(sgh_i900_matrix_key_map);

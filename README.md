@@ -36,7 +36,7 @@ Hardware support status code: C-
 
 |Basic PDA hardware<br>(all ticks for B status)||
 | ------------- |:------------:|
-|Buttons|⚠️|
+|Buttons|✔️|
 |Touchscreen|❌|
 |Suspend/Resume|❌|
 |Battery status|❌|
