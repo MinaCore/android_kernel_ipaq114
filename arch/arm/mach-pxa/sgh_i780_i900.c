@@ -569,6 +569,43 @@ static struct platform_device *devices[] __initdata = {
 	&sgh_audio,
 };
 
+int wm9713_power_gpio = 104;
+
+void hpipaq114_audio_suspend(void *priv){
+        if(wm9713_power_gpio >= 0){ //didn't get the GPIO, can't do anything
+                printk(KERN_INFO "hpipaq114_audio_suspend(), gpio%i -> off",wm9713_power_gpio);
+                gpio_set_value(wm9713_power_gpio, 0);
+        }
+}
+
+void hpipaq114_audio_resume(void *priv){
+        if(wm9713_power_gpio >= 0){ //didn't get the GPIO, can't do anything
+                printk(KERN_INFO "hpipaq114_audio_resume, gpio%i -> on",wm9713_power_gpio);
+                gpio_set_value(wm9713_power_gpio, 1);
+        }
+}
+
+static pxa2xx_audio_ops_t hpipaq114_audio_ops = {
+        .suspend = hpipaq114_audio_suspend,
+        .resume = hpipaq114_audio_resume,
+};
+
+static void __init hpipaq114_init_audio(void)
+{
+        int ret;
+
+        ret = gpio_request(wm9713_power_gpio, "WM9713 power?"); 
+        if(ret){
+                printk(KERN_ERR "Unable to register WM9713/audio gpio (%i)\n",wm9713_power_gpio);
+                wm9713_power_gpio = -1;
+        }else
+                gpio_direction_output(wm9713_power_gpio, 1); //keep it on for now!
+
+        printk("hpipaq114_init_audio: %x\n",(unsigned int)&hpipaq114_audio_ops);
+
+        pxa_set_ac97_info(&hpipaq114_audio_ops);
+
+}
 
 static void __init sgh_init(void)
 {
@@ -584,7 +621,7 @@ static void __init sgh_init(void)
 	sgh_init_leds();
 	sgh_init_keypad();
 
-	pxa_set_ac97_info(NULL);
+	hpipaq114_init_audio();
 	platform_add_devices(devices, ARRAY_SIZE(devices));
 
 	sgh_init_ohci();

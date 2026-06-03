@@ -1,310 +1,397 @@
 /*
- * Handles the Samsung I780-I900 SoC system
+ * sound/soc/pxa/hpipaq114-audio.c  --  SoC audio for HP IPAQ 114.
  *
- * Copyright (C) 2009 Mustafa Ozsakalli
+ * Mostly based on sound/soc/pxa/tosa.c.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation in version 2 of the License.
+ * Authors: Oliver Ford <ipaqcode-oliford-co-uk>
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ *  This program is free software; you can redistribute  it and/or modify it
+ *  under  the terms of  the GNU General  Public License as published by the
+ *  Free Software Foundation;  either version 2 of the  License, or (at your
+ *  option) any later version.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/module.h>
 #include <linux/moduleparam.h>
-#include <linux/platform_device.h>
+#include <linux/device.h>
 #include <linux/gpio.h>
-#include <linux/delay.h>
-#include <linux/irq.h>
-
-#include <asm/mach-types.h>
-#include <mach/audio.h>
+#include <linux/interrupt.h>
+#include <linux/workqueue.h>
 
 #include <sound/core.h>
 #include <sound/pcm.h>
-#include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
-#include <sound/initval.h>
-#include <sound/ac97_codec.h>
 
+#include <asm/mach-types.h>
+#include <mach/hardware.h>
+#include <mach/audio.h>
+
+#include "../codecs/wm9713.h"
 #include "pxa2xx-pcm.h"
 #include "pxa2xx-ac97.h"
-#include "../codecs/wm9713.h"
-#include "pxa-ssp.h"
 
-#define ARRAY_AND_SIZE(x)	(x), ARRAY_SIZE(x)
 
-#define SGH_I780_AUDIO_GPIO	0x13
-#define SGH_I900_AUDIO_GPIO	0x11
+static struct snd_soc_card hpipaq114;
+//static struct workqueue_struct *jack_detect_workqueue;
+static struct snd_soc_codec *theCodec; //FIXME: Yea, that's bad, I know.
 
-static const struct snd_soc_dapm_widget sgh_dapm_widgets[] = {
-	SND_SOC_DAPM_SPK("Front Speaker", NULL),
-	SND_SOC_DAPM_HP("Headset", NULL),
-	SND_SOC_DAPM_LINE("GSM Line Out", NULL),
-	SND_SOC_DAPM_LINE("GSM Line In", NULL),
-	SND_SOC_DAPM_LINE("Radio Line Out", NULL),
-	SND_SOC_DAPM_MIC("Front Mic", NULL),
-};
+static int hpipaq114_spk_func;		/* These are our internal copy of the kcontrol */
+static int hpipaq114_hp_func;		/* state of the two UI switches */
 
-static const struct snd_soc_dapm_route audio_map[] = {
-	/* Microphone */
-	{"MIC1", NULL, "Front Mic"},
+static int hpipaq114_hp_jack_on;	/* These are our internal copy of the DAPM widget states*/
+static int hpipaq114_hp_24pin_on;	/* so we know when not to disable IPAQ114_GPIO_HP_EN */
+
+/* gpio 7_2 must be off for headset to work _properly_,
+ * it must be on for hedaphones to work _properly_
+ * gpio 98 must be on for either to work at all 
+ * 
+ * Here, the jack/24-pin DAPM objects can theoretically 
+ * be both on. If so, the jack will be selected.
+ *
+ * TODO: Maybe that should use a MUX DAPM object?
+ */
+//#define IPAQ114_GPIO_HP_DETECT		95
+#define IPAQ114_GPIO_SPK_EN		96
+#define	IPAQ114_GPIO_HP_EN		98
+#define	IPAQ114_GPIO_HP_JACK		7
+
+#define IPAQ114_HP_AUTO		0
+#define IPAQ114_HP_JACK		1
+#define IPAQ114_HP_24PIN	2
+#define IPAQ114_HP_OFF		3
+
+#define IPAQ114_SPK_AUTO	0
+#define IPAQ114_SPK_ON		1
+#define IPAQ114_SPK_OFF		2
+
+static void hpipaq114_ext_control(struct snd_soc_codec *codec)
+{
+	int hpPresent = 0; //gpio_get_value(IPAQ114_GPIO_HP_DETECT) ? 1 : 0;
 
 	/* Speaker */
-	{"Front Speaker", NULL, "SPKL"},
-	{"Front Speaker", NULL, "SPKR"},
+	if ( hpipaq114_spk_func == IPAQ114_SPK_ON ||
+			(hpipaq114_spk_func == IPAQ114_SPK_AUTO && !hpPresent) )
+		snd_soc_dapm_enable_pin(codec, "iPAQ Speaker");
+	else
+		snd_soc_dapm_disable_pin(codec, "iPAQ Speaker");
 
-	/* Earpiece */
-	{"Headset", NULL, "HPL"},
-	{"Headset", NULL, "HPR"},
+	/* Headphones on jack or 24-pin */
+	if ( hpipaq114_hp_func == IPAQ114_HP_JACK ||
+			(hpipaq114_hp_func == IPAQ114_HP_AUTO && hpPresent) )
 
-	/* GSM Module */
-	{"MONOIN", NULL, "GSM Line Out"},
-	{"PCBEEP", NULL, "GSM Line Out"},
-	{"GSM Line In", NULL, "MONO"},
+		snd_soc_dapm_enable_pin(codec, "iPAQ Headphone Jack");
+	else
+		snd_soc_dapm_disable_pin(codec, "iPAQ Headphone Jack");
 
-	/* FM Radio Module */
-	{"LINEL", NULL, "Radio Line Out"},
-	{"LINER", NULL, "Radio Line Out"},
-};
 
-static int sgh_wm9713_init(struct snd_soc_codec *codec)
-{
-	unsigned short reg;
+	if ( hpipaq114_hp_func == IPAQ114_HP_24PIN ||
+			(hpipaq114_hp_func == IPAQ114_HP_AUTO && !hpPresent) )
 
-	snd_soc_dapm_new_controls(codec, ARRAY_AND_SIZE(sgh_dapm_widgets));
-	snd_soc_dapm_add_routes(codec, ARRAY_AND_SIZE(audio_map));
-
-	snd_soc_dapm_enable_pin(codec, "Front Speaker");
-
+		snd_soc_dapm_enable_pin(codec, "iPAQ Headset on 24-pin");
+	else
+		snd_soc_dapm_disable_pin(codec, "iPAQ Headset on 24-pin");
+		
 	snd_soc_dapm_sync(codec);
-
-	
-	return 0;
 }
 
-static int sgh_hifi_startup(struct snd_pcm_substream *substream){
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *cpu_dai = rtd->dai->cpu_dai;
-
-	cpu_dai->playback.channels_min = 2;
-    cpu_dai->playback.channels_max = 2;
-	
-    return 0;
-}
-
-static int sgh_hifi_prepare(struct snd_pcm_substream *substream) {
+static int hpipaq114_startup(struct snd_pcm_substream *substream){	
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_codec *codec = rtd->socdev->card->codec;
-	struct snd_soc_dai *codec_dai = rtd->dai->codec_dai;
-	u16 reg;
-	int gpio = machine_is_sgh_i780() ? SGH_I780_AUDIO_GPIO : SGH_I900_AUDIO_GPIO;
 
-	codec->write(codec, AC97_POWERDOWN, 0);
-	mdelay(1);
-	codec_dai->ops->set_pll(codec_dai, 0, 4096000, 0);
-	schedule_timeout_interruptible(msecs_to_jiffies(10));
-	codec->write(codec, AC97_HANDSET_RATE, 0x0000);
-	schedule_timeout_interruptible(msecs_to_jiffies(10));
-
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		reg = AC97_PCM_FRONT_DAC_RATE;
-	else
-		reg = AC97_PCM_LR_ADC_RATE;
-	codec->write(codec, AC97_EXTENDED_STATUS, 0x1);
-	codec->write(codec, reg, substream->runtime->rate);
-
-	//Turn on external speaker
-	//TODO: Headset detection
-	gpio_set_value(gpio, 1);
+	hpipaq114_ext_control(codec);
 
 	return 0;
 }
 
-static void sgh_hifi_shutdown(struct snd_pcm_substream *substream) {
-	int gpio = machine_is_sgh_i780() ? SGH_I780_AUDIO_GPIO : SGH_I900_AUDIO_GPIO;
-	gpio_direction_output(gpio, 1);
-	gpio_set_value(gpio, 0);
+static struct snd_soc_ops hpipaq114_ops = {
+ 	.startup = hpipaq114_startup,
+};
+
+static int hpipaq114_get_hp(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	ucontrol->value.integer.value[0] = hpipaq114_hp_func;
+	return 0;
 }
 
-static int sgh_voice_startup(struct snd_pcm_substream *substream)
+static int hpipaq114_set_hp(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *cpu_dai = rtd->dai->cpu_dai;
+	struct snd_soc_codec *codec =  snd_kcontrol_chip(kcontrol);
 
-	cpu_dai->playback.channels_min = 1;
-	cpu_dai->playback.channels_max = 1;
+	if (hpipaq114_hp_func == ucontrol->value.integer.value[0])
+		return 0;
+
+	hpipaq114_hp_func = ucontrol->value.integer.value[0];
+	hpipaq114_ext_control(codec);
+	return 1;
+}
+
+static int hpipaq114_get_spk(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	ucontrol->value.integer.value[0] = hpipaq114_spk_func;
+	return 0;
+}
+
+static int hpipaq114_set_spk(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec =  snd_kcontrol_chip(kcontrol);
+
+	if (hpipaq114_spk_func == ucontrol->value.integer.value[0])
+		return 0;
+
+	hpipaq114_spk_func = ucontrol->value.integer.value[0];
+	hpipaq114_ext_control(codec);
+	return 1;
+}
+
+/* Headphone jack detection */
+/*static void hpipaq114_jack_detect_work(struct work_struct *work){
+
+ 	if (hpipaq114_spk_func == IPAQ114_SPK_AUTO || 
+			hpipaq114_hp_func == IPAQ114_HP_AUTO)
+ 		hpipaq114_ext_control(theCodec);
+}*/
+
+/*static irqreturn_t hpipaq114_hp_detect_irq(int irq, void *codec)
+{
+	
+	static int initialised = 0;
+	static struct work_struct task;
+	
+	if (initialised == 0) {
+		INIT_WORK(&task, hpipaq114_jack_detect_work);
+		initialised = 1;
+	} else {
+		PREPARE_WORK(&task, hpipaq114_jack_detect_work);
+	}
+	
+	//queue_work(jack_detect_workqueue, &task);
+
+	return IRQ_HANDLED;
+}*/
+
+/* hpipaq114 dapm event handlers */
+static int hpipaq114_hp_jack_event(struct snd_soc_dapm_widget *w,
+	struct snd_kcontrol *k, int event)
+{
+	hpipaq114_hp_jack_on = SND_SOC_DAPM_EVENT_ON(event) ? 1 : 0;
+
+	gpio_set_value(IPAQ114_GPIO_HP_EN, hpipaq114_hp_jack_on || hpipaq114_hp_24pin_on);
+	gpio_set_value(IPAQ114_GPIO_HP_JACK, hpipaq114_hp_jack_on); //force select to jack if its on
 
 	return 0;
-};
+}
 
-static int sgh_voice_prepare(struct snd_pcm_substream *substream)
+static int hpipaq114_hp_24pin_event(struct snd_soc_dapm_widget *w,
+	struct snd_kcontrol *k, int event)
 {
-#define WM9713_DR_8000     0x1F40  /*  8000 samples/sec */
-#define WM9713_DR_11025    0x2B11  /* 11025 samples/sec */
-#define WM9713_DR_12000    0x2EE0  /* 12000 samples/sec */
-#define WM9713_DR_16000    0x3E80  /* 16000 samples/sec */
-#define WM9713_DR_22050    0x5622  /* 22050 samples/sec */
-#define WM9713_DR_24000    0x5DC0  /* 24000 samples/sec */
-#define WM9713_DR_32000    0x7D00  /* 32000 samples/sec */
-#define WM9713_DR_44100    0xAC44  /* 44100 samples/sec */
-#define WM9713_DR_48000    0xBB80  /* 48000 samples/sec */
+	hpipaq114_hp_24pin_on = SND_SOC_DAPM_EVENT_ON(event) ? 1 : 0;
+
+	gpio_set_value(IPAQ114_GPIO_HP_EN, hpipaq114_hp_jack_on || hpipaq114_hp_24pin_on);
+	gpio_set_value(IPAQ114_GPIO_HP_JACK, hpipaq114_hp_jack_on); //force select to jack if its on
+	
+	return 0;
+}
+
+static int hpipaq114_spk_event(struct snd_soc_dapm_widget *w,
+	struct snd_kcontrol *k, int event)
+{
+	gpio_set_value(IPAQ114_GPIO_SPK_EN, SND_SOC_DAPM_EVENT_ON(event) ? 1 : 0);
 
 	return 0;
+}
+
+/* hpipaq114 machine dapm widgets */
+static const struct snd_soc_dapm_widget hpipaq114_dapm_widgets[] = {
+	SND_SOC_DAPM_HP("iPAQ Headphone Jack", hpipaq114_hp_jack_event),
+	SND_SOC_DAPM_HP("iPAQ Headset on 24-pin", hpipaq114_hp_24pin_event),
+	SND_SOC_DAPM_SPK("iPAQ Speaker", hpipaq114_spk_event),
+	//SND_SOC_DAPM_MIC("Mic (Internal)", NULL),
 };
 
-static void sgh_voice_shutdown(struct snd_pcm_substream *substream)
-{
+/* hpipaq114 audio map */
+static const struct snd_soc_dapm_route audio_map[] = {
 
+	/* headphone connected to HPL, HPR */
+	{"iPAQ Headphone Jack", NULL, "HPL"},
+	{"iPAQ Headphone Jack", NULL, "HPR"},
+
+	/* and also the 24-pin connecotr */
+	{"iPAQ Headset on 24-pin", NULL, "HPL"},
+	{"iPAQ Headset on 24-pin", NULL, "HPR"},
+	
+	/* ext speaker connected to SPKL, OUT4 */
+	{"iPAQ Speaker", NULL, "SPKL"},
+	{"iPAQ Speaker", NULL, "OUT4"},
+
+	/* SOMETHING is physically connected to these, don't know what though */
+	/*{"????", NULL, "SPKR"},
+	{"????", NULL, "OUT3"},*/
+
+
+	/* internal mic is connected to mic1, mic2 differential - with bias */
+	//{"MIC1", NULL, "Mic Bias"},
+	//{"MIC2", NULL, "Mic Bias"},
+	//{"Mic Bias", NULL, "Mic (Internal)"},
+
+	/* headset is connected to HPOUTR, and LINEINR with bias */
+	//{"LINEINR", NULL, "Mic Bias"},
+	//{"Mic Bias", NULL, "Headset Jack"},
 };
 
-static struct snd_soc_ops sgh_ops[] = {
+static const char *hp_function[] = {"Auto", "Jack", "24-pin", "Off"};
+static const char *spk_function[] = {"Auto", "On", "Off"};
+static const struct soc_enum hpipaq114_enum[] = {
+	SOC_ENUM_SINGLE_EXT(4, hp_function),
+	SOC_ENUM_SINGLE_EXT(3, spk_function),
+};
+
+static const struct snd_kcontrol_new hpipaq114_controls[] = {
+	SOC_ENUM_EXT("iPAQ Headphone Output", hpipaq114_enum[0], hpipaq114_get_hp,
+		hpipaq114_set_hp),
+	SOC_ENUM_EXT("iPAQ Speaker", hpipaq114_enum[1], hpipaq114_get_spk,
+		hpipaq114_set_spk),
+};
+
+static int hpipaq114_ac97_init(struct snd_soc_codec *codec)
 {
-		.startup	= sgh_hifi_startup,
-		.prepare	= sgh_hifi_prepare,
-		.shutdown 	= sgh_hifi_shutdown,
+	int i, err, hp_det_irq;
+
+	 //theses are actually connected to something, but I don't know what.
+	snd_soc_dapm_nc_pin(codec, "SPKR");
+	snd_soc_dapm_nc_pin(codec, "OUT3");
+	snd_soc_dapm_nc_pin(codec, "MONO");
+
+	/* add hpipaq114 specific controls */
+	for (i = 0; i < ARRAY_SIZE(hpipaq114_controls); i++) {
+		err = snd_ctl_add(codec->card,
+				snd_soc_cnew(&hpipaq114_controls[i],codec, NULL));
+		if (err < 0)
+			return err;
+	}
+
+	/* add hpipaq114 specific widgets */
+	snd_soc_dapm_new_controls(codec, hpipaq114_dapm_widgets,
+				  ARRAY_SIZE(hpipaq114_dapm_widgets));
+
+	/* init our internal state copies */
+	hpipaq114_hp_jack_on = 1;
+	hpipaq114_hp_24pin_on = 0;
+
+	/* set up hpipaq114 specific audio path audio_map */
+	snd_soc_dapm_add_routes(codec, audio_map, ARRAY_SIZE(audio_map));
+	snd_soc_dapm_enable_pin(codec, "iPAQ Speaker");
+	snd_soc_dapm_sync(codec);
+
+	// hp_det_irq = gpio_to_irq(IPAQ114_GPIO_HP_DETECT);
+	
+	theCodec = codec;
+	//jack_detect_workqueue = create_workqueue("Jack Detect");
+	//FIXME: Free this IRQ somewhere!!
+	//if( request_irq(hp_det_irq, hpipaq114_hp_detect_irq,
+	//		IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
+	//		"HP Insert Detect", codec) )
+	//	printk(KERN_ERR "Unable to get HP jack detect IRQ.");
+
+	return 0;
+}
+
+static struct snd_soc_dai_link hpipaq114_dai[] = {
+{
+	.name = "AC97",
+	.stream_name = "AC97 HiFi",
+	.cpu_dai = &pxa_ac97_dai[PXA2XX_DAI_AC97_HIFI],
+	.codec_dai = &wm9713_dai[WM9713_DAI_AC97_HIFI],
+	.init = hpipaq114_ac97_init,
+	.ops = &hpipaq114_ops,
 },
-{
-		.startup	= sgh_voice_startup,
-		.prepare	= sgh_voice_prepare,
-		.shutdown	= sgh_voice_shutdown,
-},
+// { Don't want this yet
+// 	.name = "AC97 Aux",
+// 	.stream_name = "AC97 Aux",
+// 	.cpu_dai = &pxa_ac97_dai[PXA2XX_DAI_AC97_AUX],
+// 	.codec_dai = &wm9713_dai[WM9713_DAI_AC97_AUX],
+// 	.ops = &hpipaq114_ops,
+// },
 };
 
-static struct snd_soc_dai_link sgh_dai[] = {
-	{
-		.name = "AC97",
-		.stream_name = "AC97 HiFi",
-		.cpu_dai = &pxa_ac97_dai[PXA2XX_DAI_AC97_HIFI],
-		.codec_dai = &wm9713_dai[WM9713_DAI_AC97_HIFI],
-		.init = sgh_wm9713_init,
-		.ops = &sgh_ops[0],
-	},
-	{
-		.name = "AC97 Aux",
-		.stream_name = "AC97 Aux",
-		.cpu_dai = &pxa_ac97_dai[PXA2XX_DAI_AC97_AUX],
-		.codec_dai = &wm9713_dai[WM9713_DAI_AC97_AUX],
-	},
-	{
-		.name = "WM9713 Voice",
-		.stream_name = "WM9713 Voice",
-		.cpu_dai = &pxa_ssp_dai[PXA_DAI_SSP3],
-		.codec_dai = &wm9713_dai[WM9713_DAI_PCM_VOICE],
-		.ops = &sgh_ops[1],
-	},
-};
-
-static struct snd_soc_card sgh = {
-	.name = "SGHAudio",
+static struct snd_soc_card hpipaq114 = {
+	.name = "hpipaq114",
 	.platform = &pxa2xx_soc_platform,
-	.dai_link = sgh_dai,
-	.num_links = ARRAY_SIZE(sgh_dai),
+	.dai_link = hpipaq114_dai,
+	.num_links = ARRAY_SIZE(hpipaq114_dai),
 };
 
-static struct snd_soc_device sgh_snd_devdata = {
-	.card = &sgh,
+static struct snd_soc_device hpipaq114_snd_devdata = {
+	.card = &hpipaq114,
 	.codec_dev = &soc_codec_dev_wm9713,
 };
 
-static struct platform_device *sgh_snd_device;
+static struct platform_device *hpipaq114_snd_device;
 
-static int sgh_wm9713_probe(struct platform_device *pdev)
+static int __init hpipaq114_init(void)
 {
 	int ret;
-	int gpio = machine_is_sgh_i780() ? SGH_I780_AUDIO_GPIO : SGH_I900_AUDIO_GPIO;
+	//if (gpio_request(IPAQ114_GPIO_HP_DETECT, "HP Insert Detect"))
+	//	printk(KERN_ERR "Unable to register 'HP Insert Detect' gpio (%i)\n",
+	//		IPAQ114_GPIO_HP_DETECT);
+	if (gpio_request(IPAQ114_GPIO_SPK_EN, "Speaker Enable"))
+		printk(KERN_ERR "Unable to register 'Speaker Enable' gpio (%i)\n",
+			IPAQ114_GPIO_SPK_EN);
+	if (gpio_request(IPAQ114_GPIO_HP_EN, "Headphone/set Enable"))
+		printk(KERN_ERR "Unable to register 'Headphone/set Enable' gpio (%i)\n",
+			IPAQ114_GPIO_HP_EN);
+	if (gpio_request(IPAQ114_GPIO_HP_JACK, "Headphone jack/24-pin Select"))
+		printk(KERN_ERR "Unable to register 'Headphone jack/24-pin Select' gpio (%i)\n",
+			IPAQ114_GPIO_HP_JACK);
 
-	gpio_request(0x64, "WM9713 Power");
-	gpio_direction_output(0x64, 1);
-	gpio_set_value(0x64, 0);
-	mdelay(10);
-	gpio_set_value(0x64, 1);
+	//gpio_direction_input(IPAQ114_GPIO_HP_DETECT);
+	gpio_direction_output(IPAQ114_GPIO_SPK_EN, 0);
+	gpio_direction_output(IPAQ114_GPIO_HP_EN, 0);
+	gpio_direction_output(IPAQ114_GPIO_HP_JACK, 0);
 
-	gpio_request(gpio, "Speaker");
-	gpio_direction_output(gpio, 1);
-	gpio_set_value(gpio, 0);
+	hpipaq114_snd_device = platform_device_alloc("soc-audio", -1);
+	if (!hpipaq114_snd_device){
+		ret = -ENOMEM;
+		goto err_alloc;
+	}
 
-	sgh_snd_device = platform_device_alloc("soc-audio", -1);
-	if (!sgh_snd_device)
-		return -ENOMEM;
+	platform_set_drvdata(hpipaq114_snd_device, &hpipaq114_snd_devdata);
+	hpipaq114_snd_devdata.dev = &hpipaq114_snd_device->dev;
+	ret = platform_device_add(hpipaq114_snd_device);
 
-	platform_set_drvdata(sgh_snd_device, &sgh_snd_devdata);
-	sgh_snd_devdata.dev = &sgh_snd_device->dev;
+	if (!ret)
+		return 0;
 
-	ret = platform_device_add(sgh_snd_device);
-	if (ret != 0)
-		platform_device_put(sgh_snd_device);
+	platform_device_put(hpipaq114_snd_device);
+
+err_alloc:
+	//gpio_free(IPAQ114_GPIO_HP_DETECT);
+	gpio_free(IPAQ114_GPIO_SPK_EN);
+	gpio_free(IPAQ114_GPIO_HP_EN);
+	gpio_free(IPAQ114_GPIO_HP_JACK);
 
 	return ret;
 }
 
-static int __devexit sgh_wm9713_remove(struct platform_device *pdev)
+static void __exit hpipaq114_exit(void)
 {
-	platform_device_unregister(sgh_snd_device);
-	return 0;
+	platform_device_unregister(hpipaq114_snd_device);
+	//gpio_free(IPAQ114_GPIO_HP_DETECT);
+	gpio_free(IPAQ114_GPIO_SPK_EN);
+	gpio_free(IPAQ114_GPIO_HP_EN);
+	gpio_free(IPAQ114_GPIO_HP_JACK);
+	//FIXME: free_irq( hp_det_irq, ??? );
 }
 
-#ifdef CONFIG_PM
-
-static int sgh_wm9713_suspend(struct platform_device *pdev,
-	pm_message_t state)
-{
-	//struct snd_soc_card *card = platform_get_drvdata(pdev);
-	return 0;
-	//return snd_soc_card_suspend_pcms(card, state);
-}
-
-static int sgh_wm9713_resume(struct platform_device *pdev)
-{
-	//struct snd_soc_card *card = platform_get_drvdata(pdev);
-	return 0;
-	//return snd_soc_card_resume_pcms(card);
-}
-
-#else
-#define sgh_wm9713_suspend NULL
-#define sgh_wm9713_resume  NULL
-#define sgh_wm9713_suspend_late NULL
-#define sgh_wm9713_resume_early  NULL
-#endif
-
-static struct platform_driver sgh_wm9713_driver = {
-	.probe			= sgh_wm9713_probe,
-	.remove			= __devexit_p(sgh_wm9713_remove),
-	.suspend		= sgh_wm9713_suspend,
-	.resume			= sgh_wm9713_resume,
-	.driver			= {
-		.name		= "sgh-asoc",
-		.owner		= THIS_MODULE,
-	},
-};
-
-static int __init sgh_asoc_init(void)
-{
-	int ret;
-
-	ret = platform_driver_register(&sgh_wm9713_driver);
-
-	return ret;
-}
-
-static void __exit sgh_asoc_exit(void)
-{
-	platform_driver_unregister(&sgh_wm9713_driver);
-}
-
-module_init(sgh_asoc_init);
-module_exit(sgh_asoc_exit);
+module_init(hpipaq114_init);
+module_exit(hpipaq114_exit);
 
 /* Module information */
-MODULE_AUTHOR("Mustafa Ozsakalli (ozsakalli@hotmail.com)");
-MODULE_DESCRIPTION("ALSA SoC WM9713 Samsung SGH I780/I900");
+MODULE_AUTHOR("Oliver Ford");
+MODULE_DESCRIPTION("ALSA SoC HP iPAQ 114");
 MODULE_LICENSE("GPL");

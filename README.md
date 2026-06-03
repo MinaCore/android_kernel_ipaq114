@@ -46,7 +46,7 @@ Hardware support status code: C-
 
 |Advanced PDA hardware<br>(all ticks for A status)||
 | ------------- |:------------:|
-|Sound|❌|
+|Sound|✔️|
 |Flash memory|❌|
 |Serial|N/A|
 |LEDs|✔️|
