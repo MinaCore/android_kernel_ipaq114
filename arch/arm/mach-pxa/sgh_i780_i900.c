@@ -167,35 +167,36 @@ static struct platform_device sgh_backlight_device = {
  New: pixclock = (K * 200000000) / 15600
 */
 static struct pxafb_mode_info sgh_i780_mode = {
-        .pixclock		= 243600,	// K = 19
-        .xres			= 320,		// HACK: Android does not like square resolutions
-        .yres			= 319,
+        .pixclock		= 256500,	// K = 19
+        .xres			= 240,		// HACK: Android does not like square resolutions
+        .yres			= 320,
         .bpp			= 16,
-        .hsync_len		= 16,
-        .left_margin		= 24,
-        .right_margin		= 24,
-        .vsync_len		= 2,
-        .upper_margin		= 3,
-        .lower_margin   	= 0,
+        .hsync_len		= 4,
+        .left_margin		= 20,
+        .right_margin		= 20,
+        .vsync_len		= 1,
+        .upper_margin		= 7,
+        .lower_margin   	= 6,
         .sync          	 = 0,
 };
 static struct pxafb_mode_info sgh_i900_mode = {
 	.pixclock		= 256500,	// K = 20
 	.xres			= 240,
-	.yres			= 400,
+	.yres			= 320,
 	.bpp			= 16,
-	.hsync_len		= 8,
-	.left_margin		= 8,
-	.right_margin		= 8,
-	.vsync_len		= 4,
-	.upper_margin		= 38,
-	.lower_margin		= 38,
+	.hsync_len		= 4,
+	.left_margin		= 20,
+	.right_margin		= 20,
+	.vsync_len		= 1,
+	.upper_margin		= 7,
+	.lower_margin		= 6,
 	.sync			= 0, //FB_SYNC_VERT_HIGH_ACT,
 };
 
 static struct pxafb_mach_info sgh_lcd_info = {
 	.num_modes		= 1,
 	.lcd_conn		= LCD_COLOR_TFT_16BPP | LCD_PCLK_EDGE_FALL,
+	.lccr4			= 9,
 };
 
 static void __init sgh_init_lcd(void)

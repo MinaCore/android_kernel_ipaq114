@@ -32,7 +32,7 @@ Hardware support status code: C-
 |USB to host|❌|
 |SD-MMC|✔️|
 |PCMCIA(CF)|N/A|
-|Display|⚠️|
+|Display|✔️|
 
 |Basic PDA hardware<br>(all ticks for B status)||
 | ------------- |:------------:|
