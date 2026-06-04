@@ -48,7 +48,7 @@
 #include <linux/wm97xx.h>
 #include <linux/uaccess.h>
 #include <linux/io.h>
-#include <asm/mach-types.h>
+#include <linux/slab.h>
 
 #define TS_NAME			"wm97xx"
 #define WM_CORE_VERSION		"1.00"
@@ -70,16 +70,13 @@
  * Documentation/input/input-programming.txt for more details.
  */
 
-
-static int abs_x[3] = {350, 3900, 5}; 
+static int abs_x[3] = {350, 3900, 5};
 module_param_array(abs_x, int, NULL, 0);
 MODULE_PARM_DESC(abs_x, "Touchscreen absolute X min, max, fuzz");
 
-
-static int abs_y[3] = {320, 3950, 5}; // Zylonite: 320, 3950
+static int abs_y[3] = {320, 3750, 40};
 module_param_array(abs_y, int, NULL, 0);
 MODULE_PARM_DESC(abs_y, "Touchscreen absolute Y min, max, fuzz");
-
 static int abs_p[3] = {0, 150, 4};
 module_param_array(abs_p, int, NULL, 0);
 MODULE_PARM_DESC(abs_p, "Touchscreen absolute Pressure min, max, fuzz");
@@ -202,12 +199,12 @@ void wm97xx_set_gpio(struct wm97xx *wm, u32 gpio,
 	mutex_lock(&wm->codec_mutex);
 	reg = wm97xx_reg_read(wm, AC97_GPIO_STATUS);
 
-	if (status & WM97XX_GPIO_HIGH)
+	if (status == WM97XX_GPIO_HIGH)
 		reg |= gpio;
 	else
 		reg &= ~gpio;
 
-	if (wm->id == WM9712_ID2)
+	if (wm->id == WM9712_ID2 && wm->variant != WM97xx_WM1613)
 		wm97xx_reg_write(wm, AC97_GPIO_STATUS, reg << 1);
 	else
 		wm97xx_reg_write(wm, AC97_GPIO_STATUS, reg);
@@ -300,22 +297,22 @@ static void wm97xx_pen_irq_worker(struct work_struct *work)
 		status = wm97xx_reg_read(wm, AC97_GPIO_STATUS);
 		pol = wm97xx_reg_read(wm, AC97_GPIO_POLARITY);
 
-		if (pol & status) {
+		if (WM97XX_GPIO_13 & pol & status) {
 			wm->pen_is_down = 1;
 			wm97xx_reg_write(wm, AC97_GPIO_POLARITY, pol &
-						~23); //try 23 instead of WM97XX_GPIO_13
+						~WM97XX_GPIO_13);
 		} else {
 			wm->pen_is_down = 0;
 			wm97xx_reg_write(wm, AC97_GPIO_POLARITY, pol |
-					 23);
+					 WM97XX_GPIO_13);
 		}
 
-		if (wm->id == WM9712_ID2)
+		if (wm->id == WM9712_ID2 && wm->variant != WM97xx_WM1613)
 			wm97xx_reg_write(wm, AC97_GPIO_STATUS, (status &
-						~23) << 1);
+						~WM97XX_GPIO_13) << 1);
 		else
 			wm97xx_reg_write(wm, AC97_GPIO_STATUS, status &
-						~23);
+						~WM97XX_GPIO_13);
 		mutex_unlock(&wm->codec_mutex);
 	}
 
@@ -429,20 +426,28 @@ static int wm97xx_read_samples(struct wm97xx *wm)
 		}
 
 	} else if (rc & RC_VALID) {
-		int absy, absx;
 		dev_dbg(wm->dev,
 			"pen down: x=%x:%d, y=%x:%d, pressure=%x:%d\n",
 			data.x >> 12, data.x & 0xfff, data.y >> 12,
 			data.y & 0xfff, data.p >> 12, data.p & 0xfff);
-		absx = data.x & 0xfff;
-		if (machine_is_sgh_i780())
-			absx = (wm->input_dev->absmax[ABS_X] - absx) + wm->input_dev->absmin[ABS_X];
-		input_report_abs(wm->input_dev, ABS_X, absx);
-		//invert y coordinate
-		absy = data.y & 0xfff;
-		if (machine_is_sgh_i900())
-			absy = (wm->input_dev->absmax[ABS_Y] - absy) + wm->input_dev->absmin[ABS_Y];
-		input_report_abs(wm->input_dev, ABS_Y, absy);
+/*
+ * Removed this hack as I've added the 5-point calibration
+ * method in the Android input system.
+ *
+ * If you need this hack, uncomment the following lines
+ * before compiling.
+ *
+ *   Alvin Wong
+ */
+
+/* #ifdef CONFIG_TOUCHSCREEN_WM97XX_HPIPAQ214
+		// FIXME: rotate ipaq 214's ts, please add calibration program
+		input_report_abs(wm->input_dev, ABS_X, 0xfff - (data.x & 0xfff));
+		input_report_abs(wm->input_dev, ABS_Y, 0xfff - (data.y & 0xfff));
+#else */
+		input_report_abs(wm->input_dev, ABS_X, data.x & 0xfff);
+		input_report_abs(wm->input_dev, ABS_Y, data.y & 0xfff);
+//#endif
 		input_report_abs(wm->input_dev, ABS_PRESSURE, data.p & 0xfff);
 		input_report_key(wm->input_dev, BTN_TOUCH, 1);
 		input_sync(wm->input_dev);
@@ -572,6 +577,7 @@ static void wm97xx_ts_input_close(struct input_dev *idev)
 static int wm97xx_probe(struct device *dev)
 {
 	struct wm97xx *wm;
+	struct wm97xx_pdata *pdata = dev->platform_data;
 	int ret = 0, id = 0;
 
 	wm = kzalloc(sizeof(struct wm97xx), GFP_KERNEL);
@@ -592,6 +598,8 @@ static int wm97xx_probe(struct device *dev)
 	}
 
 	wm->id = wm97xx_reg_read(wm, AC97_VENDOR_ID2);
+
+	wm->variant = WM97xx_GENERIC;
 
 	dev_info(wm->dev, "detected a wm97%02x codec\n", wm->id & 0xff);
 
@@ -636,33 +644,25 @@ static int wm97xx_probe(struct device *dev)
 	}
 
 	/* set up touch configuration */
-	wm->input_dev->name = "wm97xx touchscreen";
+	wm->input_dev->name = "wm97xx-touchscreen";
 	wm->input_dev->phys = "wm97xx";
 	wm->input_dev->open = wm97xx_ts_input_open;
 	wm->input_dev->close = wm97xx_ts_input_close;
-	set_bit(EV_ABS, wm->input_dev->evbit);
-	set_bit(EV_KEY, wm->input_dev->evbit);
-	set_bit(ABS_X, wm->input_dev->absbit);
-	set_bit(ABS_Y, wm->input_dev->absbit);
-	set_bit(ABS_PRESSURE, wm->input_dev->absbit);
-	set_bit(BTN_TOUCH, wm->input_dev->keybit);
 
-	if(machine_is_sgh_i780()){
-		input_set_abs_params(wm->input_dev, ABS_X, 350, 3900, 5, 0);
-	} else if(machine_is_sgh_i900()){
-		input_set_abs_params(wm->input_dev, ABS_X, 0, 39181660, 5, 0);
-	} else	input_set_abs_params(wm->input_dev, ABS_X, abs_x[0], abs_x[1],
+	__set_bit(EV_ABS, wm->input_dev->evbit);
+	__set_bit(EV_KEY, wm->input_dev->evbit);
+	__set_bit(BTN_TOUCH, wm->input_dev->keybit);
+
+	input_set_abs_params(wm->input_dev, ABS_X, abs_x[0], abs_x[1],
 			     abs_x[2], 0);
-	if(machine_is_sgh_i780()){
-		input_set_abs_params(wm->input_dev, ABS_Y, 290, 3900, 5, 0);
-	} else if(machine_is_sgh_i900()){
-		input_set_abs_params(wm->input_dev, ABS_Y, 0, 65412060, 5, 0);
-	} else	input_set_abs_params(wm->input_dev, ABS_Y, abs_y[0], abs_y[1],
+	input_set_abs_params(wm->input_dev, ABS_Y, abs_y[0], abs_y[1],
 			     abs_y[2], 0);
 	input_set_abs_params(wm->input_dev, ABS_PRESSURE, abs_p[0], abs_p[1],
 			     abs_p[2], 0);
+
 	input_set_drvdata(wm->input_dev, wm);
 	wm->input_dev->dev.parent = dev;
+
 	ret = input_register_device(wm->input_dev);
 	if (ret < 0)
 		goto dev_alloc_err;
@@ -675,6 +675,7 @@ static int wm97xx_probe(struct device *dev)
 	}
 	platform_set_drvdata(wm->battery_dev, wm);
 	wm->battery_dev->dev.parent = dev;
+	wm->battery_dev->dev.platform_data = pdata;
 	ret = platform_device_add(wm->battery_dev);
 	if (ret < 0)
 		goto batt_reg_err;
@@ -688,6 +689,7 @@ static int wm97xx_probe(struct device *dev)
 	}
 	platform_set_drvdata(wm->touch_dev, wm);
 	wm->touch_dev->dev.parent = dev;
+	wm->touch_dev->dev.platform_data = pdata;
 	ret = platform_device_add(wm->touch_dev);
 	if (ret < 0)
 		goto touch_reg_err;
