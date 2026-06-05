@@ -20,7 +20,7 @@ You can download the **arm2008-q3** toolchain from the [Releases](https://github
 *Note: The partition order is critical. Ensure the ext2 partition is the first one on the SD card, otherwise the system will fail to mount the root filesystem.*
 
 ## Hardware support
-Hardware support status code: C-
+Hardware support status code: B-
 
 |Boot process <br>(all ticks for D status)||
 | ------------- |:------------:|
