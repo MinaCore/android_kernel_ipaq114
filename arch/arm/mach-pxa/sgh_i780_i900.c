@@ -143,12 +143,13 @@ struct platform_device hpipaq114_device_ds1wm = {
 	.resource	= hpipaq114_resource_ds1wm,
 	.num_resources	= ARRAY_SIZE(hpipaq114_resource_ds1wm),
 	.dev		=  {
-		.platform_data  = &hpipaq114_ds1wm_cell,
+	.platform_data  = &hpipaq114_ds1wm_cell,
 	}
 };
 
 static void __init hpipaq114_init_ds1wm(void)
 {
+	mdelay(200);
 	platform_device_register(&hpipaq114_device_ds1wm);
 }
 
@@ -176,7 +177,7 @@ static int hpipaq114_power_init(struct device *dev)
 /*	ret += gpio_direction_input(GPIO_CHG);
 	ret += gpio_direction_input(GPIO_PREQ);
 	ret += gpio_direction_input(GPIO_BATT_CONN);*/
-	
+	printk(KERN_ERR "power_init: ret=%d CEN=%d DOK=%d\n", ret, gpio_get_value(GPIO_CEN), gpio_get_value(GPIO_DOK));
 	return ret;
 }
 static void hpipaq114_power_exit(struct device *dev)
@@ -221,6 +222,8 @@ static struct platform_device hpipaq114_power_device = {
 static void __init hpipaq114_init_power(void)
 {
 	int ret;
+	hpipaq114_power_resource[0].start = gpio_to_irq(GPIO_DOK);
+	hpipaq114_power_resource[0].end   = gpio_to_irq(GPIO_DOK);
 	ret = platform_device_register(&hpipaq114_power_device);	
 	if (ret)
 		printk(KERN_ERR "unable to register pda_power device\n");

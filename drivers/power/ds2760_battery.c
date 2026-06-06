@@ -303,11 +303,29 @@ static void ds2760_battery_write_rated_capacity(struct ds2760_device_info *di,
 	w1_ds2760_recall_eeprom(di->w1_dev, DS2760_EEPROM_BLOCK1);
 }
 
+
+static ssize_t ds2760_battery_show_batt_vol(struct device *dev,
+    struct device_attribute *attr, char *buf)
+{
+    struct power_supply *psy = dev_get_drvdata(dev);
+    struct ds2760_device_info *di = container_of(psy, struct ds2760_device_info, bat);
+    return sprintf(buf, "%d\n", di->voltage_uV / 1000);
+}
+
+static ssize_t ds2760_battery_show_batt_temp(struct device *dev,
+    struct device_attribute *attr, char *buf)
+{
+    struct power_supply *psy = dev_get_drvdata(dev);
+    struct ds2760_device_info *di = container_of(psy, struct ds2760_device_info, bat);
+    return sprintf(buf, "%d\n", di->temp_C);
+}
+
+
 static void ds2760_battery_work(struct work_struct *work)
 {
 	struct ds2760_device_info *di = container_of(work,
 		struct ds2760_device_info, monitor_work.work);
-	const int interval = HZ * 60;
+	const int interval = HZ * 10;
 
 	dev_dbg(di->dev, "%s\n", __func__);
 
@@ -418,6 +436,15 @@ static int ds2760_battery_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CAPACITY:
 		val->intval = di->rem_capacity;
 		break;
+	case POWER_SUPPLY_PROP_HEALTH:
+		val->intval = POWER_SUPPLY_HEALTH_GOOD;
+		break;
+	case POWER_SUPPLY_PROP_PRESENT:
+		val->intval = 1;
+		break;
+	case POWER_SUPPLY_PROP_TECHNOLOGY:
+		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -436,8 +463,12 @@ static enum power_supply_property ds2760_battery_props[] = {
 	POWER_SUPPLY_PROP_TEMP,
 	POWER_SUPPLY_PROP_TIME_TO_EMPTY_NOW,
 	POWER_SUPPLY_PROP_CAPACITY,
+	POWER_SUPPLY_PROP_HEALTH,
+	POWER_SUPPLY_PROP_PRESENT,
+	POWER_SUPPLY_PROP_TECHNOLOGY,
 };
-
+static DEVICE_ATTR(batt_vol, 0444, ds2760_battery_show_batt_vol, NULL);
+static DEVICE_ATTR(batt_temp, 0444, ds2760_battery_show_batt_temp, NULL);
 static int ds2760_battery_probe(struct platform_device *pdev)
 {
 	char status;
@@ -489,6 +520,8 @@ static int ds2760_battery_probe(struct platform_device *pdev)
 		dev_err(di->dev, "failed to register battery\n");
 		goto batt_failed;
 	}
+	device_create_file(di->bat.dev, &dev_attr_batt_vol);
+	device_create_file(di->bat.dev, &dev_attr_batt_temp);
 
 	INIT_DELAYED_WORK(&di->monitor_work, ds2760_battery_work);
 	INIT_DELAYED_WORK(&di->set_charged_work,

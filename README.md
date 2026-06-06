@@ -30,8 +30,7 @@ Hardware support status code: B-
 | ------------- |:------------:|
 |Basic hardware|✔️|
 |USB to host|❌|
-|SD-MMC|✔️|
-|PCMCIA(CF)|N/A|
+|SD-MMC|⚠|
 |Display|✔️|
 
 |Basic PDA hardware<br>(all ticks for B status)||
@@ -39,17 +38,17 @@ Hardware support status code: B-
 |Buttons|✔️|
 |Touchscreen|✔️|
 |Suspend/Resume|❌|
-|Battery status|⚠|
-|APM status|❌|
+|Battery status|✔️|
+|APM status|⚠|
 |Backlight|✔️|
 |GUI launching|✔️|
 
 |Advanced PDA hardware<br>(all ticks for A status)||
 | ------------- |:------------:|
-|Sound|✔️|
+|Sound|⚠|
 |Flash memory|❌|
 |Serial|N/A|
-|LEDs|✔️|
+|LEDs|⚠|
 |Bootloader|N/A|
 
 |Full hardware support <br>(all ticks for A+ status)||
