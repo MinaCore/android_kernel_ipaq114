@@ -1,0 +1,4 @@
+config ANDROID_POWER
+    bool "Android power driver"
+    depends on WAKELOCK
+    default y

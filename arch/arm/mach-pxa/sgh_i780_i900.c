@@ -41,6 +41,8 @@
 #include <mach/pxa2xx_spi.h>
 #include <mach/pxa3xx-regs.h>
 #include <mach/mfp-pxa300.h>
+#include <linux/leds.h>
+#include <linux/leds_pwm.h>
 #if defined(CONFIG_PXA_DVFM)
 #include <mach/dvfm.h>
 #include <mach/pxa3xx_dvfm.h> 
@@ -94,6 +96,7 @@ static struct gpio_led sgh_leds[] = {
 	[3] = {
 		.name			= "keyboard",
 	},
+
 };
 
 static struct gpio_led_platform_data sgh_leds_info = {
@@ -145,21 +148,29 @@ static void __init sgh_init_leds(void)
 static inline void sgh_init_leds(void) {}
 #endif
 
-#if defined(CONFIG_FB_PXA) || defined(CONFIG_FB_PXA_MODULE)
-static struct platform_pwm_backlight_data sgh_backlight_data = {
-	.pwm_id		= 3,
-	.max_brightness	= 100,
-	.dft_brightness	= 100,
-	.pwm_period_ns	= 10000,
+static struct led_pwm sgh_pwm_leds[] = {
+    {
+        .name          = "lcd-backlight",  // ← именно это ищет Android
+        .pwm_id        = 2,
+        .max_brightness = 255,
+        .pwm_period_ns = 10000,
+    },
+};
+static struct led_pwm_platform_data sgh_pwm_data = {
+    .num_leds = ARRAY_SIZE(sgh_pwm_leds),
+    .leds     = sgh_pwm_leds,
 };
 
 static struct platform_device sgh_backlight_device = {
-	.name		= "backlight",
-	.dev		= {
-		.parent = &pxa27x_device_pwm1.dev,
-		.platform_data	= &sgh_backlight_data,
-	},
+    .name = "leds_pwm",
+    .id   = -1,
+    .dev  = {
+        .parent        = &pxa27x_device_pwm0.dev,
+        .platform_data = &sgh_pwm_data,
+    },
 };
+extern void pwm_backlight_update_status(struct backlight_device *bl); 
+
 /* Pixclock Calculation
  Calculated from reviewing HaRET source: http://xanadux.cvs.sourceforge.net/viewvc/xanadux/haret/haret-gnu/src/script.cpp?view=markup
  pixclock = K * 8MHz / CLK ;   where CLK is 312MHz and K is last 8 bits of lccr3
@@ -205,9 +216,6 @@ static void __init sgh_init_lcd(void)
 	sgh_lcd_info.modes = (machine_is_sgh_i780()) ? &sgh_i780_mode : &sgh_i900_mode;
 	set_pxa_fb_info(&sgh_lcd_info);
 }
-#else
-static inline void sgh_init_lcd(void) {}
-#endif
 
 /****************************
 * Keypad                    *
@@ -557,6 +565,9 @@ static mfp_cfg_t sgh_mfp_cfg[] __initdata = {
 	GPIO122_KP_MKOUT_1,
 	GPIO123_KP_MKOUT_2,
 	GPIO124_KP_MKOUT_3,
+
+	/* BACKLIGHT */
+	GPIO19_PWM2_OUT,
 	
 };
 
@@ -628,6 +639,8 @@ static void __init sgh_init(void)
 	sgh_init_udc();
 	sgh_init_i2c();
 	sgh_init_spi();
+	gpio_request(83, "backlight-autobrightness");
+	gpio_direction_output(83, 0);
 	/*
 	dvfm_register("Test", &dvfm);
 	dvfm_disable_op_name("D1", dvfm);

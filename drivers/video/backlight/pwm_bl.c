@@ -67,8 +67,9 @@ static int pwm_backlight_probe(struct platform_device *pdev)
 	struct backlight_device *bl;
 	struct pwm_bl_data *pb;
 	int ret;
-
+	printk(KERN_ERR "===> PWM-BL DEBUG: probe started for device %s\n", pdev->name);
 	if (!data) {
+		printk(KERN_ERR "===> PWM-BL DEBUG: platform_data is NULL!\n");
 		dev_err(&pdev->dev, "failed to find platform data\n");
 		return -EINVAL;
 	}
@@ -76,40 +77,54 @@ static int pwm_backlight_probe(struct platform_device *pdev)
 	if (data->init) {
 		ret = data->init(&pdev->dev);
 		if (ret < 0)
+			printk(KERN_ERR "===> PWM-BL DEBUG: data->init failed with %d\n", ret);
 			return ret;
 	}
 
 	pb = kzalloc(sizeof(*pb), GFP_KERNEL);
 	if (!pb) {
+		printk(KERN_ERR "===> PWM-BL DEBUG: kzalloc failed\n");
 		dev_err(&pdev->dev, "no memory for state\n");
 		ret = -ENOMEM;
 		goto err_alloc;
 	}
+
+	printk(KERN_ERR "===> PWM-BL DEBUG: requesting pwm_id = %d\n", data->pwm_id);
 
 	pb->period = data->pwm_period_ns;
 	pb->notify = data->notify;
 
 	pb->pwm = pwm_request(data->pwm_id, "backlight");
 	if (IS_ERR(pb->pwm)) {
+		printk(KERN_ERR "===> PWM-BL DEBUG: pwm_request FAILED with error %ld\n", PTR_ERR(pb->pwm));
 		dev_err(&pdev->dev, "unable to request PWM for backlight\n");
 		ret = PTR_ERR(pb->pwm);
 		goto err_pwm;
 	} else
+		printk(KERN_ERR "===> PWM-BL DEBUG: pwm_request SUCCESS! Pointer: %p\n", pb->pwm);
 		dev_dbg(&pdev->dev, "got pwm for backlight\n");
-
+	printk(KERN_ERR "===> PWM-BL DEBUG: registering backlight device with name: '%s'\n", dev_name(&pdev->dev));
 	bl = backlight_device_register(dev_name(&pdev->dev), &pdev->dev,
 			pb, &pwm_backlight_ops);
 	if (IS_ERR(bl)) {
+		printk(KERN_ERR "===> PWM-BL DEBUG: backlight_device_register FAILED with error %ld\n", PTR_ERR(bl));
 		dev_err(&pdev->dev, "failed to register backlight\n");
 		ret = PTR_ERR(bl);
 		goto err_bl;
 	}
+	printk(KERN_ERR "===> PWM-BL DEBUG: backlight_device_register SUCCESS! Pointer: %p\n", bl);
+
+	// ДЕБАГ: проверяем финальную инициализацию яркости
+	pb->period = data->pwm_period_ns;
+	printk(KERN_ERR "===> PWM-BL DEBUG: config properties: period=%d ns, max_brightness=%d, default=%d\n",
+		data->pwm_period_ns, data->max_brightness, data->dft_brightness);
 
 	bl->props.max_brightness = data->max_brightness;
 	bl->props.brightness = data->dft_brightness;
 	backlight_update_status(bl);
-
+	printk(KERN_ERR "===> PWM-BL DEBUG: probe finished successfully!\n");
 	platform_set_drvdata(pdev, bl);
+
 	return 0;
 
 err_bl:
