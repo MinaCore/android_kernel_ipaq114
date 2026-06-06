@@ -454,7 +454,7 @@ static int ds2760_battery_probe(struct platform_device *pdev)
 
 	di->dev			= &pdev->dev;
 	di->w1_dev		= pdev->dev.parent;
-	di->bat.name		= dev_name(&pdev->dev);
+	di->bat.name 		= "battery";
 	di->bat.type		= POWER_SUPPLY_TYPE_BATTERY;
 	di->bat.properties	= ds2760_battery_props;
 	di->bat.num_properties	= ARRAY_SIZE(ds2760_battery_props);

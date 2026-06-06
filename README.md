@@ -39,7 +39,7 @@ Hardware support status code: B-
 |Buttons|✔️|
 |Touchscreen|✔️|
 |Suspend/Resume|❌|
-|Battery status|❌|
+|Battery status|⚠|
 |APM status|❌|
 |Backlight|✔️|
 |GUI launching|✔️|

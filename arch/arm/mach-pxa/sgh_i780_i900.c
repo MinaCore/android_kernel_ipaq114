@@ -43,6 +43,9 @@
 #include <mach/mfp-pxa300.h>
 #include <linux/leds.h>
 #include <linux/leds_pwm.h>
+#include <linux/mfd/core.h>
+#include <linux/mfd/ds1wm.h>
+#include <linux/clk.h>
 #if defined(CONFIG_PXA_DVFM)
 #include <mach/dvfm.h>
 #include <mach/pxa3xx_dvfm.h> 
@@ -77,6 +80,155 @@
 #define GPIO118_SGH_I900_WIFI_CMD	   	118
 
 #define GPIO16_SGH_SPI_CHIP_SEL	 	 	 16
+
+/********************************************************
+* DS1WM (1Wire Bus Master)                              *
+********************************************************/
+extern struct platform_device hpipaq114_device_ds1wm;
+
+static int hpipaq114_ds1wm_enable(struct platform_device *pdev)
+{
+	printk("Enabling DS1WM (CLK on)\n");
+
+	struct clk *clk = clk_get(&pdev->dev, NULL);
+	if (IS_ERR(clk)) return PTR_ERR(clk);
+	clk_enable(clk);
+
+	return 0;
+}
+
+static int hpipaq114_ds1wm_disable(struct platform_device *pdev)
+{
+	printk("Disabling DS1WM (CLK off)\n");
+
+	struct clk *clk = clk_get(&pdev->dev, NULL);
+	if (!IS_ERR(clk)) clk_disable(clk);
+
+	return 0;
+}
+
+
+static struct ds1wm_driver_data hpipaq114_ds1wm_info = {
+	.clock_rate 	= 28000000, 
+	.active_high	= 1,
+};
+
+static struct resource hpipaq114_resource_ds1wm[] = {
+	[0] = {
+		.start	= 0x41b00000,
+		.end	= 0x41b00014,
+		.flags	= IORESOURCE_MEM,
+	},
+	[1] = {
+		.start	= IRQ_1WIRE,
+		.end	= IRQ_1WIRE,
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+static struct mfd_cell hpipaq114_ds1wm_cell = {
+	.name          = "ds1wm",
+	.enable        = hpipaq114_ds1wm_enable,
+	.disable       = hpipaq114_ds1wm_disable,
+//	.suspend)(struct platform_device *dev);
+//	.resume)(struct platform_device *dev);
+	.driver_data   = &hpipaq114_ds1wm_info,
+	.resources	= hpipaq114_resource_ds1wm,
+	.num_resources	= ARRAY_SIZE(hpipaq114_resource_ds1wm),
+};
+
+struct platform_device hpipaq114_device_ds1wm = {
+	.name		= "ds1wm",
+	.id		= -1,
+	.resource	= hpipaq114_resource_ds1wm,
+	.num_resources	= ARRAY_SIZE(hpipaq114_resource_ds1wm),
+	.dev		=  {
+		.platform_data  = &hpipaq114_ds1wm_cell,
+	}
+};
+
+static void __init hpipaq114_init_ds1wm(void)
+{
+	platform_device_register(&hpipaq114_device_ds1wm);
+}
+
+/****************************
+* AC Power Supply           *
+****************************/
+#if defined(CONFIG_PDA_POWER) || defined(CONFIG_PDA_POWER_MODULES)
+#define GPIO_DOK 	91	/* ! DC-In OK (MAX8677) */
+#define GPIO_CEN 	120	/* ! Charge Enable (MAX8677) */
+#define GPIO_CHG 	105	/* Charging (MAX8677) */
+#define GPIO_PREQ 	106	/* Prequal (MAX8677) */
+#define GPIO_BATT_CONN 	107	/* Battery Connected (??) */
+//NOTE: CEN pulled low in LPM by MFP CFG.
+static int hpipaq114_power_init(struct device *dev)
+{
+	int ret;
+	ret = gpio_request(GPIO_DOK, "!DC-in OK");
+	ret += gpio_request(GPIO_CEN, "!Charge Enable");
+/*	ret += gpio_request(GPIO_CHG, "Charging");
+	ret += gpio_request(GPIO_PREQ, "Prequal charge");
+	ret += gpio_request(GPIO_BATT_CONN, "Battery Connected"); */
+	
+	ret += gpio_direction_input(GPIO_DOK);
+	ret += gpio_direction_output(GPIO_CEN, 0); //leave ther charger always on
+/*	ret += gpio_direction_input(GPIO_CHG);
+	ret += gpio_direction_input(GPIO_PREQ);
+	ret += gpio_direction_input(GPIO_BATT_CONN);*/
+	
+	return ret;
+}
+static void hpipaq114_power_exit(struct device *dev)
+{
+	gpio_free(GPIO_DOK);
+	gpio_free(GPIO_CEN);
+/*	gpio_free(GPIO_CHG);
+	gpio_free(GPIO_PREQ);
+	gpio_free(GPIO_BATT_CONN);	*/
+}
+static int hpipaq114_power_ac_online(void)
+{
+	return (gpio_get_value(GPIO_DOK) == 0);
+}
+static char *hpipaq114_ac_supplied_to[] = {
+	"battery",
+};
+static struct pda_power_pdata hpipaq114_power_data = {
+	.init			= hpipaq114_power_init,
+	.is_ac_online		= hpipaq114_power_ac_online,
+	.exit			= hpipaq114_power_exit,
+	.supplied_to		= hpipaq114_ac_supplied_to,
+	.num_supplicants	= ARRAY_SIZE(hpipaq114_ac_supplied_to),
+};
+static struct resource hpipaq114_power_resource[] = {
+	{
+		.name		= "ac",
+		.start		= gpio_to_irq(GPIO_DOK),
+		.end		= gpio_to_irq(GPIO_DOK),
+		.flags		= IORESOURCE_IRQ |
+				  IORESOURCE_IRQ_HIGHEDGE |
+				  IORESOURCE_IRQ_LOWEDGE,
+	},
+};
+static struct platform_device hpipaq114_power_device = {
+	.name			= "pda-power",
+	.id			= -1,
+	.dev.platform_data	= &hpipaq114_power_data,
+	.resource		= hpipaq114_power_resource,
+	.num_resources		= ARRAY_SIZE(hpipaq114_power_resource),
+};
+static void __init hpipaq114_init_power(void)
+{
+	int ret;
+	ret = platform_device_register(&hpipaq114_power_device);	
+	if (ret)
+		printk(KERN_ERR "unable to register pda_power device\n");
+}
+#else
+static inline void hpipaq214_init_power(void) {}
+#endif /* CONFIG_PDA_POWER || CONFIG_PDA_POWER_MODULES */
+
 
 #if defined(CONFIG_LEDS_GPIO) || defined(CONFIG_LEDS_GPIO_MODULE)
 static struct gpio_led sgh_leds[] = {
@@ -569,6 +721,12 @@ static mfp_cfg_t sgh_mfp_cfg[] __initdata = {
 	/* BACKLIGHT */
 	GPIO19_PWM2_OUT,
 	
+	// Charging GPIOs (MAX8677)
+	GPIO91_GPIO,                           // !DOK - DC/USB power ok
+	GPIO120_GPIO | MFP_LPM_DRIVE_LOW,     // !CEN - charge enable, low in LPM
+	GPIO107_GPIO,                          // Battery present
+	GPIO126_OW_DQ | MFP_LPM_FLOAT,        // 1-Wire DS2760
+	
 };
 
 static struct platform_device sgh_audio = {
@@ -631,7 +789,8 @@ static void __init sgh_init(void)
 	sgh_init_mmc();
 	sgh_init_leds();
 	sgh_init_keypad();
-
+	hpipaq114_init_ds1wm();
+	hpipaq114_init_power();
 	hpipaq114_init_audio();
 	platform_add_devices(devices, ARRAY_SIZE(devices));
 
