@@ -41,7 +41,7 @@ Hardware support status code: B-
 |Suspend/Resume|❌|
 |Battery status|❌|
 |APM status|❌|
-|Backlight|❌|
+|Backlight|✔️|
 |GUI launching|✔️|
 
 |Advanced PDA hardware<br>(all ticks for A status)||
