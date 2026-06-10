@@ -9,18 +9,21 @@ You can download the **arm2008-q3** toolchain from the [Releases](https://github
 
 ## Usage
 
-1. **Download:** Get the `build.zip` archive from the [Releases](https://github.com/MinaCore/android_kernel_ipaq114/releases/latest) section.
+1. **Download:** Get the required archives from the [Releases](https://github.com/MinaCore/android_kernel_ipaq114/releases/latest) section:
+   * `rootfs.zip`
+   * `haret.zip`
+
 2. **Prepare the SD card:** 
    - Partition 1 (Primary): **ext2** (for the root filesystem).
    - Partition 2 (Primary): **FAT32** (for boot files).
-3. **Setup rootfs:** Extract the contents of the `rootfs` folder from the `build.zip` archive into the **ext2** partition.
-4. **Setup boot files:** Copy `haret.exe`, `default.txt`, and `Image` from the archive to the **FAT32** partition.
+3. **Setup rootfs:** Extract the contents of `rootfs.zip` into the **ext2** partition.
+4. **Setup boot files:** Extract `haret.zip` (containing `haret.exe`, `default.txt`, and `zImage`) into the **FAT32** partition.
 5. **Launch:** Run `haret.exe` from the **FAT32** partition on your device.
 
 *Note: The partition order is critical. Ensure the ext2 partition is the first one on the SD card, otherwise the system will fail to mount the root filesystem.*
 
 ## Hardware support
-Hardware support status code: B
+Hardware support status code: B-
 
 |Boot process <br>(all ticks for D status)||
 | ------------- |:------------:|
